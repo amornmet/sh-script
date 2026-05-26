@@ -55,7 +55,7 @@ for ip in {1..254}; do
         ((count_used++))
         mac_addr=$(arp -n $current_ip | grep $current_ip | awk '{print $3}')
         [ -z "$mac_addr" ] || [ "$mac_addr" == "<incomplete>" ] && mac_addr="Unknown"
-
+        
         echo -e "$current_ip | MAC: ${PURPLE}$mac_addr${NC}" >> "$USED_FILE"
     else
         ((count_free++))

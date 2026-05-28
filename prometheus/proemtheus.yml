@@ -1,0 +1,169 @@
+# ==============================================================================
+# PROMETHEUS GLOBAL CONFIGURATION
+# ==============================================================================
+global:
+  scrape_interval: 15s     # กำหนดเวลาดึงข้อมูลทุกๆ 15 วินาที
+  evaluation_interval: 15s # กำหนดเวลาประเมินผล Rule ทุกๆ 15 วินาที
+
+# การตั้งค่าแจ้งเตือน (ถ้ามี Alertmanager)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            # - localhost:9093
+
+# โหลด Rule (ถ้ามี)
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# ==============================================================================
+# SCRAPE CONFIGURATIONS (Exporters)
+# ==============================================================================
+scrape_configs:
+
+  # ----------------------------------------------------------------------------
+  # 1. Prometheus Self-Monitoring
+  # ----------------------------------------------------------------------------
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+
+  # ----------------------------------------------------------------------------
+  # 2. Node Exporter (สำหรับ Monitor Linux Server: CPU, RAM, Disk, Network)
+  # ----------------------------------------------------------------------------
+  # [วิธีติดตั้ง Node Exporter บน Linux แบบ Binary]
+  # 1. ดาวน์โหลด: wget https://github.com/prometheus/node_exporter/releases/download/v1.8.1/node_exporter-1.8.1.linux-amd64.tar.gz
+  # 2. แตกไฟล์: tar -xvf node_exporter-1.8.1.linux-amd64.tar.gz
+  # 3. ย้ายไปที่ /usr/local/bin: sudo mv node_exporter-1.8.1.linux-amd64/node_exporter /usr/local/bin/
+  # 4. สร้าง Systemd Service ที่ /etc/systemd/system/node_exporter.service ใส่ค่าดังนี้:
+  #    [Unit]
+  #    Description=Node Exporter
+  #    After=network.target
+  #
+  #    [Service]
+  #    User=node_exporter (หรือ root)
+  #    ExecStart=/usr/local/bin/node_exporter
+  #
+  #    [Install]
+  #    WantedBy=multi-user.target
+  # 5. สั่งรัน: sudo systemctl daemon-reload && sudo systemctl enable --now node_exporter
+  # ----------------------------------------------------------------------------
+  - job_name: "node-exporter"
+    static_configs:
+      - targets: ["192.168.1.50:9100"] # เปลี่ยนเป็น IP ของ Target Server
+
+
+  # ----------------------------------------------------------------------------
+  # 3. Cadvisor (สำหรับ Monitor Docker Containers & Resource Usage)
+  # ----------------------------------------------------------------------------
+  # [วิธีติดตั้ง cAdvisor ด้วย Docker คอมมานด์]
+  # รันคำสั่งด้านล่างนี้บน Host ที่รัน Docker:
+  # docker run -d \
+  #   --volume=/:/rootfs:ro \
+  #   --volume=/var/run:/var/run:ro \
+  #   --volume=/sys:/sys:ro \
+  #   --volume=/var/lib/docker/:/var/lib/docker:ro \
+  #   --volume=/dev/disk/:/dev/disk:ro \
+  #   --publish=8080:8080 \
+  #   --detach=true \
+  #   --name=cadvisor \
+  #   --privileged \
+  #   --device=/dev/kmsg \
+  #   gcr.io/cadvisor/cadvisor:v0.49.1
+  # ----------------------------------------------------------------------------
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["192.168.1.50:8080"]
+
+
+  # ----------------------------------------------------------------------------
+  # 4. Blackbox Exporter (สำหรับทำ Probing เช็คสถานะ HTTP/HTTPS, Ping, TCP, DNS)
+  # ----------------------------------------------------------------------------
+  # [วิธีติดตั้ง Blackbox Exporter ด้วย Docker]
+  # docker run -d -p 9115:9115 --name blackbox_exporter prometheus/blackbox-exporter
+  # ----------------------------------------------------------------------------
+  - job_name: "blackbox-http"
+    metrics_path: /probe
+    params:
+      module: [http_2xx] # ใช้โมดูลตรวจสอบว่าเว็บส่งสถานะ HTTP 2xx กลับมาไหม
+    static_configs:
+      - targets:
+          - https://www.google.com
+          - http://your-internal-website.local
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: __param_target
+        target_label: instance
+      - target_label: __address__
+        replacement: "192.168.1.60:9115" # IP ของตัว Blackbox Exporter เอง
+
+  - job_name: "blackbox-ping"
+    metrics_path: /probe
+    params:
+      module: [icmp] # ใช้สำหรับตรวจจับการ Ping (ICMP) ดูว่า Host ปลายทางตายไหม
+    static_configs:
+      - targets:
+          - "8.8.8.8"
+          - "192.168.1.1" # ไอพี Gateway หรือ Firewall
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: __param_target
+        target_label: instance
+      - target_label: __address__
+        replacement: "192.168.1.60:9115"
+
+
+  # ----------------------------------------------------------------------------
+  # 5. MySQLd Exporter (สำหรับ Monitor ฐานข้อมูล MySQL / MariaDB)
+  # ----------------------------------------------------------------------------
+  # [วิธีติดตั้ง MySQLd Exporter]
+  # 1. สร้าง User ใน MySQL ให้สิทธิ์ในการอ่าน Metrics:
+  #    CREATE USER 'exporter'@'localhost' IDENTIFIED BY 'Password1234' WITH MAX_USER_CONNECTIONS 3;
+  #    GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'exporter'@'localhost';
+  # 2. ติดตั้งตัว Exporter บน Database Server ผ่าน Docker:
+  #    docker run -d \
+  #      -p 9104:9104 \
+  #      --name mysqld-exporter \
+  #      -e DATA_SOURCE_NAME="exporter:Password1234@(localhost:3306)/" \
+  #      prom/mysqld-exporter
+  # ----------------------------------------------------------------------------
+  - job_name: "mysql-exporter"
+    static_configs:
+      - targets: ["192.168.1.70:9104"]
+
+
+  # ----------------------------------------------------------------------------
+  # 6. PostgreSQL Exporter (สำหรับ Monitor ฐานข้อมูล PostgreSQL)
+  # ----------------------------------------------------------------------------
+  # [วิธีติดตั้ง Postgres Exporter ด้วย Docker]
+  # รันคำสั่งเชื่อมต่อกับ Postgres Instance ของคุณ:
+  # docker run -d \
+  #   -p 9187:9187 \
+  #   --name postgres-exporter \
+  #   -e DATA_SOURCE_NAME="postgresql://postgres:SecretPassword@192.168.1.80:5432/postgres?sslmode=disable" \
+  #   wrouesnel/postgres_exporter
+  # ----------------------------------------------------------------------------
+  - job_name: "postgres-exporter"
+    static_configs:
+      - targets: ["192.168.1.80:9187"]
+
+
+  # ----------------------------------------------------------------------------
+  # 7. Ceph Exporter (สำหรับ Cluster Storage Monitoring)
+  # Note: หากเป็น Ceph Luminous (v12) ขึ้นไป แนะนำให้ใช้ Built-in Mgr Module จะง่ายที่สุด
+  # ----------------------------------------------------------------------------
+  # [วิธีเปิดใช้งาน Built-in Ceph Prometheus Module]
+  # รันบน Ceph Mgr Node ตัวใดตัวหนึ่ง:
+  # 1. สั่งเปิดใช้งานโมดูล: ceph mgr module enable prometheus
+  # 2. ตรวจสอบ Port (ปกติจะรันที่ Port 9283 อัตโนมัติบนทุกตัวที่เป็น Active/Standby MGR):
+  #    ceph prometheus status
+  # ----------------------------------------------------------------------------
+  - job_name: "ceph-cluster"
+    static_configs:
+      - targets:
+          - "172.16.10.11:9283" # Ceph Manager Node 1
+          - "172.16.10.12:9283" # Ceph Manager Node 2
